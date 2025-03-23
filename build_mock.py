@@ -9,10 +9,10 @@ from astropy import wcs
 # from astropy.coordinates import SkyCoord
 # from scipy.stats import qmc
 
-from parameters  import Parameters
-from spec_model  import SlitModel
-from image_model import ImageModel
-from mock import Mock
+from klm.parameters  import Parameters
+from klm.spec_model  import SlitModel
+from klm.image_model import ImageModel
+from klm.mock import Mock
 
 plt.style.use('classic')
 plt.rcParams.update({
@@ -27,8 +27,8 @@ def prepare_a_slitspec(RA_obj, Dec_obj, Set):
     """
     slit_len   =  8
     slit_width =  1
-    slit_LPA   = 25*u.deg
-    slit_LPA   = 90*u.deg - slit_LPA  # degrees east of north. Want w.r.t. east.
+    slit_LPA   = 25*u.deg + 90*u.deg
+    # slit_LPA   = 90*u.deg - slit_LPA  # degrees east of north. Want w.r.t. east.
     
     # Only select one from these 3 RA-Dec settings
     if   Set == 'C':
@@ -37,12 +37,12 @@ def prepare_a_slitspec(RA_obj, Dec_obj, Set):
         slit_Dec   = Dec_obj
     elif Set == 'A':
         # (2) Set A ONLY: 1 arcsec offset (from Set C slit)
-        slit_RA    = RA_obj  - slit_width*u.arcsec * np.sin(slit_LPA)
-        slit_Dec   = Dec_obj + slit_width*u.arcsec * np.cos(slit_LPA)
+        slit_RA    = RA_obj  - slit_width*u.arcsec * np.cos(slit_LPA)
+        slit_Dec   = Dec_obj + slit_width*u.arcsec * np.sin(slit_LPA)
     elif Set == 'B':
         # (3) Set B ONLY: -1 arcsec offset
-        slit_RA    = RA_obj  + slit_width*u.arcsec * np.sin(slit_LPA)
-        slit_Dec   = Dec_obj - slit_width*u.arcsec * np.cos(slit_LPA)
+        slit_RA    = RA_obj  + slit_width*u.arcsec * np.cos(slit_LPA)
+        slit_Dec   = Dec_obj - slit_width*u.arcsec * np.sin(slit_LPA)
     
     spec_pix_scale  = 1/3.2     # arcsec/pix # Binospec: 3.2 px/arcsec
     spec_shape      = [32, 40]  # (spatial pixels, N wavelength points)
@@ -71,9 +71,9 @@ def prepare_an_image(RA_obj, Dec_obj):
     """
         Make a dic for image data
     """
-    image_shape     = (40, 40)
-    image_pix_scale = 0.2     # arcsec/pix: 0.2 for HSC image
-    psfFWHM         = 0.6       # arcsec
+    image_shape     = (40, 40) # nRA, nDEC
+    image_pix_scale = 0.2      # arcsec/pix: 0.2 for HSC image
+    psfFWHM         = 0.6      # arcsec
     ap_wcs           = wcs.WCS(naxis=2) # Create WCS
     ap_wcs.wcs.crpix = np.array([image_shape[0]/2+0.5,
                                  image_shape[0]/2+0.5]) # Cntrl ref pix (0.5-based)
@@ -110,16 +110,17 @@ def make_mock_data(emi_line_lst, meta_gal, mock_params,
     meta_spec['rhl'] = (mock_params['shared_params-r_hl_disk']+
                         mock_params['shared_params-r_hl_bulge'])/2
     spec_snr  = mock_params['shared_params-spec_snr']
-    spec_flux = mock_params[f'{emi_line_lst[0]}_params-I01']
     image_snr = mock_params['shared_params-image_snr']
+    spec_flux = mock_params[f'{emi_line_lst[0]}_params-I01']
     
     spec_model      = SlitModel(obj_param=meta_gal, 
                                 meta_param=meta_spec)
+    
     this_line_dict  = {**updated_dict['shared_params'], 
                        **updated_dict[f'{emi_line_lst[0]}_params']} # merge dict
     spec_data       = spec_model.get_observable(this_line_dict)
     if if_add_noise==True:
-        noise_std   = spec_flux * (20/500) # MMT: 30 noise in 500 flux counts
+        noise_std   = spec_flux * (20/500) # MMT: 20 noise in 500 flux counts
         spec_noise  = noise_std * np.random.randn(spec_data.shape[0],
                                                   spec_data.shape[1]) # if add noise
         spec_data   = spec_data + spec_noise # spec_noise
@@ -183,7 +184,7 @@ def save_dic_and_pkl(slit_name, mock_data_all_sets,
     # To read, always regenerate by using ap_wcs. (by JD)
     mock_data_info['image']['par_meta'].pop('wcs') # delete it!
     
-    with open(f'mock_100/pkl/mock_{slit_name}_{iter_num}.pkl', "wb") as f:
+    with open(f'{mock_folder}pkl/mock_{slit_name}_{iter_num}.pkl', "wb") as f:
         joblib.dump(mock_data_info, f)
 
     return mock_data_info
@@ -233,7 +234,7 @@ def make_exam_plots(mock_data_info, slit_name, iter_num):
                     [yUL, yUR, yLR, yLL, yUL], color=color, linestyle=ls)
             return 
         
-        image_data = mock_data_info['image']['data']
+        image_data = mock_data_info['image']['data'].T
         objRA      = mock_data_info['image']['par_meta']['RA']
         objDec     = mock_data_info['image']['par_meta']['Dec']
         ap_wcs     = mock_data_info['image']['par_meta']['ap_wcs']
@@ -252,13 +253,13 @@ def make_exam_plots(mock_data_info, slit_name, iter_num):
         x0slit, y0slit = ap_wcs.wcs_world2pix([[slitRA, slitDec]], 0)[0]  
         ax2.scatter(x0obj, y0obj, marker='x', s=360, color='black', zorder=1)
         rot_rectangle(ax2, x0slit, y0slit, slitWidth/pixScale, slitLen/pixScale, 
-                      (90-slit_LPA)/57.3, 'white', '-')
+                      (slit_LPA)/57.3, 'white', '-')
         ax2.set_xlim(left=0, right=image_data.shape[1]-1)
         ax2.set_ylim(bottom=0, top=image_data.shape[0]-1)
         ax2.coords['ra' ].set_major_formatter('dd:mm:ss')
         ax2.coords['dec'].set_major_formatter('dd:mm:ss')
         ax2.set_xlabel('RA')
-        ax2.set_ylabel('Dec')
+        ax2.set_ylabel('Dec', labelpad=-1)
         ax2.grid(linestyle=':', color='white', alpha=0.5)
         ax2.set_title('Mock Subaru Imaging')
         
@@ -273,7 +274,7 @@ def make_exam_plots(mock_data_info, slit_name, iter_num):
         ax1.text(1, 1, ax1txts, fontsize=10, color='white', ha='right', va='top', 
                  transform=ax1.transAxes)
     
-    plt.savefig(f'mock_100/mock_{slit_name}_{iter_num}.png', 
+    plt.savefig(f'{mock_folder}mock_{slit_name}_{iter_num}.png', 
                 dpi=150, bbox_inches='tight')
     plt.show()
     plt.close()
@@ -286,15 +287,16 @@ def make_a_mock(update_dict=None, iter_num=999, if_add_noise=True):
     RA_obj     = 42.00292 *u.deg
     Dec_obj    = -3.404363*u.deg
     redshift   =  0.94
-    emi_line_lst = ['OII']
+    emi_line_lst = ['OII','OII','OII']
     meta_gal = {}
     meta_gal = {
                 'redshift': redshift,
                 'RA':      RA_obj,
                 'Dec':     Dec_obj,
                 'beta':    0*u.deg,
-                # 'log10_Mstar':    10.0,
-                # 'log10_Mstar_err': 0.2,
+                'log10_Mstar': np.log10(142) * 3.869 + 1.718, 
+                # None, by log10(vcirc) = (log10_Mstar - 1.718) / 3.869
+                'log10_Mstar_err': 0.1,
                 }
     
     mock_params = {
@@ -342,10 +344,22 @@ def make_a_mock(update_dict=None, iter_num=999, if_add_noise=True):
     make_exam_plots(mock_data_info, slit_name, iter_num)    
     return
 
+
+
+mock_folder = 'mock_100_PA115/'
+
+# iternum = 98
+# addnoise = False
+# update_dict = {
+#     'shared_params-spec_snr': 40,
+#     'shared_params-cosi': 0.125
+# }
+# make_a_mock(update_dict, iter_num=iternum, if_add_noise=addnoise)
+
 iternum = 1
 for addnoise in [True, False]:
     for spec_snr in [10, 25, 40, 55]:
-        for cosi in [0.125, 0.25, 0.375, 0.5, 0.675, 0.75, 0.825, 1]:
+        for cosi in [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]:
             print('--------', iternum, addnoise, spec_snr, cosi, '--------')
             update_dict = {
                 'shared_params-spec_snr': spec_snr,
@@ -354,86 +368,3 @@ for addnoise in [True, False]:
             make_a_mock(update_dict, iter_num=iternum, if_add_noise=addnoise)
             iternum += 1
         iternum += 2
-
-# Sampling method: Latin Hypercube (LHS)
-# how_many_iter = 10
-# sampler = qmc.LatinHypercube(d=8, seed=0)
-# sample = sampler.random(n=how_many_iter)
-# image_snr = [24, 132]
-# spec_snr  = [13,  33]
-# gamma_t   = [-0.1, 0.1]
-# cosi      = [   0,   1]
-# theta_int = [   0, 2*np.pi]
-# vscale     = [0.1,  3]
-# r_hl_disk  = [0.15, 3]
-# r_hl_bulge = [0.15, 3]
-# l_bounds = [image_snr[0], spec_snr[0],  gamma_t[0], cosi[0], theta_int[0], 
-#             vscale[0],    r_hl_disk[0], r_hl_bulge[0]]
-# u_bounds = [image_snr[1], spec_snr[1],  gamma_t[1], cosi[1], theta_int[1], 
-#             vscale[1],    r_hl_disk[1], r_hl_bulge[1]]
-# for sampled_params in qmc.scale(sample, l_bounds, u_bounds):
-#     iter_num += 1
-#     mock_params['shared_params-image_snr']  = sampled_params[0]
-#     mock_params['shared_params-spec_snr']   = sampled_params[1]
-#     mock_params['shared_params-gamma_t']    = sampled_params[2]
-#     mock_params['shared_params-cosi']       = sampled_params[3]
-#     mock_params['shared_params-theta_int']  = sampled_params[4]
-#     mock_params['shared_params-vscale']     = sampled_params[5]
-#     mock_params['shared_params-r_hl_disk']  = sampled_params[6]
-#     mock_params['shared_params-r_hl_bulge'] = sampled_params[7]
-#     mock_data      = make_mock_data(emi_line_lst, meta_gal, mock_params)
-#     mock_data_info = save_dic_and_pkl(mask, slit_name, 
-#                                       mock_data, mock_params, meta_gal, iter_num)
-#     make_exam_plots(mock_data_info, mask, slit_name, iter_num)
-
-# Sampling method: Random in Gaussian
-# parameters = [
-#     # keyname, mean,sigma,   min, max
-#     ("g1",          0,   0.5,  -0.5,  0.5),
-#     ("g2",          0,   0.5,  -0.5,  0.5),
-#     ("cosi",      0.5,   0.5,     0,    1),
-#     ("theta_int",   0, np.pi,-np.pi,np.pi),
-#     ("vscale",    1.5,   1.5,   0.1,    3),
-#     ("r_hl_disk", 1.5,   1.5,  0.15,    3),
-#     ("r_hl_bulge",1.5,   1.5,  0.15,    3),
-#     ("flux",        3,     2,     1,    5),
-#     ("flux_bulge",  3,     2,     1,    5),
-#     ("I01",        25,    25,     0,   50),
-#     ("I02",        25,    25,     0,   50),
-#     ("bkg",         5,     5,     0,   10),
-# ]
-# all_sampled_params = {}
-# for param, mean, std, lower, upper in parameters:
-#     values = []
-#     while len(values) < how_many_iter:
-#         sample = np.random.normal(mean, std, 1)[0]
-#         if lower <= sample <= upper:
-#             values.append(sample)
-#     all_sampled_params[param] = values
-# def transform_to_list(sampled_params):
-#     keys = list(sampled_params.keys())
-#     num_samples = len(next(iter(sampled_params.values())))
-#     b = [
-#         {key: sampled_params[key][i] for key in keys}
-#         for i in range(num_samples)
-#     ]
-#     return b
-# param_list = transform_to_list(all_sampled_params)
-# for i in range(len(param_list)):
-#     iter_num += 1
-#     mock_params['shared_params-g1']         = param_list[i]['g1']
-#     mock_params['shared_params-g2']         = param_list[i]['g2']
-#     mock_params['shared_params-cosi']       = param_list[i]['cosi']
-#     mock_params['shared_params-theta_int']  = param_list[i]['theta_int']
-#     mock_params['shared_params-vscale']     = param_list[i]['vscale']
-#     mock_params['shared_params-r_hl_disk']  = param_list[i]['r_hl_disk']
-#     mock_params['shared_params-r_hl_bulge'] = param_list[i]['r_hl_bulge']
-#     mock_params['shared_params-flux']       = param_list[i]['flux']
-#     mock_params['shared_params-flux_bulge'] = param_list[i]['flux_bulge']
-#     mock_params['OII_params-I01']           = param_list[i]['I01']
-#     mock_params['OII_params-I02']           = param_list[i]['I02']
-#     mock_params['OII_params-bkg_level']     = param_list[i]['bkg']
-#     mock_data      = make_mock_data(emi_line_lst, meta_gal, mock_params)
-#     mock_data_info = save_dic_and_pkl(mask, slit_name, 
-#                                       mock_data, mock_params, meta_gal, iter_num)
-#     make_exam_plots(mock_data_info, mask, slit_name, iter_num)

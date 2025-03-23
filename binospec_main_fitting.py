@@ -1,9 +1,10 @@
 import joblib
 import pickle
+# import yaml
 import getdist
 import numpy as np
 import galsim
-from ultranest_sampler import UltranestSampler
+from   klm.ultranest_sampler import UltranestSampler
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as path_effects
@@ -11,41 +12,16 @@ matplotlib.use('TkAgg')  # 非 GUI 模式
 # matplotlib.use('module://matplotlib_inline.backend_inline')
 plt.style.use('default')
 
-# Useful functions
-def rough_check_gamma_convergence(inference):
-    print(inference.params)
-
-    param_grid = np.linspace(-0.5, 0.5, 20) # gamma_t
-    log_like   = []
-    for i in range(len(param_grid)):
-        likeli = inference.calc_joint_loglike([param_grid[i]])
-        log_like.append(likeli)
-        
-    plt.plot(param_grid, log_like)
-    plt.show()
-    return
-
-def overwrite_best_fit_params_in_dic(inference):
-    # See parameters.py:128 for details
-    bestfitdic = inference.params.gen_param_dict(inference.config.params.names, 
-                                                 [0.6])
-    return bestfitdic
 
 
-<<<<<<< Updated upstream
-for iter_num in [75]:
-=======
-<<<<<<< HEAD
-for iter_num in [76, 77, 78]:
-=======
-for iter_num in [75]:
->>>>>>> bb78cd849b9ba274f524a7b1012e9f9be07207f1
->>>>>>> Stashed changes
+mock_folder = 'mock_100/'
+
+for iter_num in [67, 65, 63, 61]:
     slit_name = '095'
     run       = iter_num
     
     # Load
-    with open(f'mock_100/pkl/mock_{slit_name}_{iter_num}.pkl', "rb") as f:
+    with open(f'{mock_folder}pkl/mock_{slit_name}_{iter_num}.pkl', "rb") as f:
         data_info = joblib.load(f)
         
         # Recover wcs(galsim.wcs) from ap_wcs
@@ -59,8 +35,9 @@ for iter_num in [75]:
     config_dic = {
         'galaxy_params': {
             'obs_type': 'slit', 
-            'line_species': ['OII'], 
-            'log10_Mstar': 10, # None, 
+            'line_species': ['OII','OII','OII'], 
+            'log10_Mstar': np.log10(142) * 3.869 + 1.718, 
+            # None, by log10(vcirc) = (log10_Mstar - 1.718) / 3.869
             'log10_Mstar_err': 0.1, # None, 
             'line_profile_path': None,
             }, 
@@ -105,8 +82,8 @@ for iter_num in [75]:
             }, 
         'TFprior': {
             'use_TFprior': True, 
-            'log10_vTF':   np.log(142), 
-            'sigmaTF':      0.05, 
+            'log10_vTF':   None, # np.log10(142), 
+            'sigmaTF':     None, 
             'a':            None, 
             'b':            None, 
             'sigmaTF_intr': None, 
@@ -123,7 +100,11 @@ for iter_num in [75]:
                     'latex_name': r'$g_2$'
                     },
                 'vcirc': {
-                    'prior': {'min': 0, 'max': 300}, # linear
+                    'prior': {'min': 119, # -3-sigma away from 142
+                              'max': 170, # +3-sigma away from 142
+                              'norm':
+                                  {'loc': 'TFprior.log10_vTF',
+                                   'scale': 'TFprior.sigmaTF'}}, 
                     'latex_name': r'$v_{\rm circ}$'
                     },
                 # 'gamma_t': {
@@ -202,9 +183,15 @@ for iter_num in [75]:
     
     #
     inference = UltranestSampler(data_info, config_dic)
+    # rough_check_gamma_convergence(data_info)
+    
+    save_path = './'
+    
+    # For Pranjal's co-check
+    # with open( f'{save_path}'+f'run0.{run}/config.yaml', 'w') as file:
+    #     yaml.dump(inference.config.__repr__, file)
     
     ## Output path
-    save_path = './'
     #---------------------------  Run Ultranest --------------------------- #
     """ To see each iter/eval's param set in fitting, debug by setting 
         a breakpoint on Line 2628 in site-packages/ultranest/integrator.py
@@ -212,7 +199,7 @@ for iter_num in [75]:
     """
     sampler = inference.run(output_dir=f'./run0.{run}/', test_run=False, run_num=run)
     
-    np.save(f'{save_path}/run0.{run}/ultranest_sampler_results.npy', sampler.results)
+    # np.save(f'{save_path}/run0.{run}/ultranest_sampler_results.npy', sampler.results)
     # If need to read...
     # samples = np.load('./samples.npy')
     
@@ -256,8 +243,8 @@ for iter_num in [75]:
                          inference, best_fit_dict, estimates, this_line_dict,
                          run, save_path):
         nspec = len(data_info['spec'])
-        image_fit  = inference.image_model.get_image(best_fit_dict['shared_params'])
-        image_obs  = inference.data_image
+        image_fit  = inference.image_model.get_image(best_fit_dict['shared_params']).T
+        image_obs  = inference.data_image.T
         image_chi2 = inference.calc_image_loglike(best_fit_dict)
         image_dof  = image_fit.shape[0] * image_fit.shape[1] - len(estimates)
         
@@ -357,3 +344,58 @@ for iter_num in [75]:
     plot_obs_fit_res(data_info, 
                      inference, best_fit_dict, estimates, this_line_dict,
                      run, save_path)
+
+
+
+# Useful functions
+def rough_check_gamma_convergence(data_info):
+    """ 
+    To use, only leave one free param in fitting param dictionary.
+
+    You need to adjust residual dict params to true values.
+    """
+    data_info1 = data_info.copy()
+    data_info2 = data_info.copy()
+    data_info3 = data_info.copy()
+    data_info1['spec'] = []
+    data_info1['spec'].append(data_info['spec'][0])
+    data_info2['spec'] = []
+    data_info2['spec'].append(data_info['spec'][1])
+    data_info3['spec'] = []
+    data_info3['spec'].append(data_info['spec'][2])
+    inference1 = UltranestSampler(data_info1, config_dic)
+    inference2 = UltranestSampler(data_info2, config_dic)
+    inference3 = UltranestSampler(data_info3, config_dic)
+    
+    param_grid = np.linspace(-0.5, 0.5, 20) # gamma_t
+    log_like, log_like1, log_like2, log_like3   = [], [], [], []
+    for i in range(len(param_grid)):
+        # print(param_grid[i])
+        likeli = inference.calc_joint_loglike([param_grid[i]])
+        log_like.append(likeli)
+        # print(param_grid[i])
+        likeli1 = inference1.calc_joint_loglike([param_grid[i]])
+        log_like1.append(likeli1)
+        # print(param_grid[i])
+        likeli2 = inference2.calc_joint_loglike([param_grid[i]])
+        log_like2.append(likeli2)
+        # print(param_grid[i])
+        likeli3 = inference3.calc_joint_loglike([param_grid[i]])
+        log_like3.append(likeli3)
+    
+    plt.semilogy(param_grid, -np.array(log_like), label='combined')
+    plt.semilogy(param_grid, -np.array(log_like1), ls='-.', label='1')
+    plt.semilogy(param_grid, -np.array(log_like2), ls='--', label='2')
+    plt.semilogy(param_grid, -np.array(log_like3), ls=':', label='3')
+    plt.axvline(x=0)
+    plt.legend()
+    plt.grid()
+    plt.show()
+    return
+
+def overwrite_best_fit_params_in_dic(inference):
+    # See parameters.py:128 for details
+    bestfitdic = inference.params.gen_param_dict(inference.config.params.names, 
+                                                 [0.6])
+    return bestfitdic
+
