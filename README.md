@@ -2,7 +2,7 @@
 
 To Pranjal:
 
-Here are all the codes (nowhere else) I built and run chains. 
+Here are my codes I built and run chains. 
 
 * See [`build_mock.py`](./build_mock.py) for building mocks. 
 
